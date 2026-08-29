@@ -1,72 +1,47 @@
 #!/bin/bash
 
 echo "🔍 Tjekker og opdaterer synkronisering..."
-
-# ============================================
-# 1. Hent seneste versioner fra GitHub
-# ============================================
-echo "--- Henter værktøjer fra GitHub ---"
-
-# Hent upryd
-echo "📥 Henter upryd..."
-wget -q -N -O /tmp/upryd.sh https://raw.githubusercontent.com/hjbjrg/problembasen/main/upryd.sh
-if [ -f /tmp/upryd.sh ] && [ -s /tmp/upryd.sh ]; then
-    sudo cp /tmp/upryd.sh /usr/local/bin/upryd
-    sudo chmod +x /usr/local/bin/upryd
-    echo "✅ upryd opdateret!"
-    rm /tmp/upryd.sh
-else
-    echo "⚠️  Kunne ikke hente upryd - springer over"
-fi
-
-# Hent spejl
-echo "📥 Henter spejl..."
-wget -q -N -O /tmp/spejl.sh https://raw.githubusercontent.com/hjbjrg/problembasen/main/spejl.sh
-if [ -f /tmp/spejl.sh ] && [ -s /tmp/spejl.sh ]; then
-    sudo cp /tmp/spejl.sh /usr/local/bin/spejl
-    sudo chmod +x /usr/local/bin/spejl
-    echo "✅ spejl opdateret!"
-    rm /tmp/spejl.sh
-else
-    echo "⚠️  Kunne ikke hente spejl - springer over"
-fi
-
 echo ""
 
-# ============================================
-# 2. Problembasen
-# ============================================
-if [ -d ~/projects/problembasen ]; then
-    echo "--- Problembasen ---"
-    cd ~/projects/problembasen
-    git fetch origin
-    git pull origin main
-    echo "---"
-    git log --oneline | head -3
-    echo "---"
+sync_repo() {
+    local dir="$1"
+    local name="$2"
+
+    if [ -d "$dir" ]; then
+        echo "--- $name ---"
+        cd "$dir" || return
+        
+        if [ -n "$(git status --porcelain)" ]; then
+            echo "📤 Gemmer og uploader lokale ændringer..."
+            git add .
+            git commit -m "Auto-sync fra $(hostname) - $(date '+%Y-%m-%d %H:%M')"
+        fi
+
+        echo "📥 Henter seneste fra GitHub..."
+        git pull origin main
+        
+        echo "📤 Sender til GitHub..."
+        git push origin main
+        
+        echo "--- Seneste commits ---"
+        git log --oneline | head -3
+    else
+        echo "❌ Mappe ikke fundet: $dir"
+    fi
+    echo ""
+}
+
+sync_repo "$HOME/projects/scripts" "Scripts"
+sync_repo "$HOME/projects/problembasen" "Problembasen"
+
+if [ -d "$HOME/projects/problembasen" ]; then
     echo "📥 Henter .env fra server..."
-    scp hjbjrg.com@ssh.simply.com:/var/www/hjbjrg.com/public_html/problembase/.env ~/projects/problembasen/.env
+    scp hjbjrg.com@ssh.simply.com:/var/www/hjbjrg.com/public_html/problembase/.env "$HOME/projects/problembasen/.env"
     echo "---"
-    cat .env | grep ENCRYPTION_KEY 2>/dev/null || echo "Ingen ENCRYPTION_KEY i .env"
-else
-    echo "❌ Mappe ikke fundet: ~/projects/problembasen"
+    grep "ENCRYPTION_KEY" "$HOME/projects/problembasen/.env" 2>/dev/null || echo "Ingen ENCRYPTION_KEY i .env"
+    echo ""
 fi
 
-echo ""
+sync_repo "$HOME/projects/birdbase" "Birdbase"
 
-# ============================================
-# 3. Birdbase
-# ============================================
-if [ -d ~/projects/birdbase ]; then
-    echo "--- Birdbase ---"
-    cd ~/projects/birdbase
-    git fetch origin
-    git pull origin main
-    echo "---"
-    git log --oneline | head -3
-else
-    echo "❌ Mappe ikke fundet: ~/projects/birdbase"
-fi
-
-echo ""
-echo "✅ Færdig."
+echo "✅ Synkronisering færdig."
