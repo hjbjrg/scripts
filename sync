@@ -11,15 +11,21 @@ sync_repo() {
         echo "--- $name ---"
         cd "$dir" || return
         
+        # Gem lokale ændringer (hvis nogen)
         if [ -n "$(git status --porcelain)" ]; then
             echo "📤 Gemmer og uploader lokale ændringer..."
             git add .
             git commit -m "Auto-sync fra $(hostname) - $(date '+%Y-%m-%d %H:%M')"
         fi
 
+        # Hent ændringer fra GitHub (med rebase for at undgå konflikter)
         echo "📥 Henter seneste fra GitHub..."
-        git pull origin main
-        
+        if ! git pull --rebase origin main 2>/dev/null; then
+            echo "⚠️  Kunne ikke rebase - forsøger merge i stedet..."
+            git pull origin main --no-rebase
+        fi
+
+        # Push til GitHub
         echo "📤 Sender til GitHub..."
         git push origin main
         
@@ -31,9 +37,17 @@ sync_repo() {
     echo ""
 }
 
+# ============================================
+# 1. Scripts (værktøjer)
+# ============================================
 sync_repo "$HOME/projects/scripts" "Scripts"
+
+# ============================================
+# 2. Problembasen
+# ============================================
 sync_repo "$HOME/projects/problembasen" "Problembasen"
 
+# Hent .env fra server
 if [ -d "$HOME/projects/problembasen" ]; then
     echo "📥 Henter .env fra server..."
     scp hjbjrg.com@ssh.simply.com:/var/www/hjbjrg.com/public_html/problembase/.env "$HOME/projects/problembasen/.env"
@@ -42,6 +56,9 @@ if [ -d "$HOME/projects/problembasen" ]; then
     echo ""
 fi
 
+# ============================================
+# 3. Birdbase
+# ============================================
 sync_repo "$HOME/projects/birdbase" "Birdbase"
 
 echo "✅ Synkronisering færdig."
