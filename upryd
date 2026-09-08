@@ -19,20 +19,20 @@ fi
 
 clear
 echo -e "${PURPLE}========================================${NC}"
-echo -e "${PURPLE}     🍃 UPRYD - Linux Mint${NC}"
+echo -e "${PURPLE}      🍃 UPRYD - Linux Mint${NC}"
 echo -e "${PURPLE}========================================${NC}"
 echo -e "${BLUE}Start: $(date)${NC}\n"
 
-echo -e "${YELLOW}[1/6] Opdaterer pakkelister...${NC}"
+echo -e "${YELLOW}[1/7] Opdaterer pakkelister...${NC}"
 sudo apt update -qq
 
-echo -e "\n${YELLOW}[2/6] Opgraderer pakker...${NC}"
+echo -e "\n${YELLOW}[2/7] Opgraderer pakker...${NC}"
 sudo apt upgrade -y
 
-echo -e "\n${YELLOW}[3/6] Opgraderer distribution...${NC}"
+echo -e "\n${YELLOW}[3/7] Opgraderer distribution...${NC}"
 sudo apt dist-upgrade -y
 
-echo -e "\n${YELLOW}[4/6] Opdaterer Flatpak-pakker...${NC}"
+echo -e "\n${YELLOW}[4/7] Opdaterer Flatpak-pakker...${NC}"
 if command -v flatpak &> /dev/null; then
     echo -e "${GREEN}✅ Flatpak fundet - opdaterer...${NC}"
     flatpak update -y
@@ -42,7 +42,7 @@ else
     echo -e "${RED}❌ Flatpak ikke installeret - springer over${NC}"
 fi
 
-echo -e "\n${YELLOW}[5/6] Tjekker Snap...${NC}"
+echo -e "\n${YELLOW}[5/7] Tjekker Snap...${NC}"
 if command -v snap &> /dev/null; then
     echo -e "${GREEN}✅ Snap fundet - opdaterer...${NC}"
     sudo snap refresh
@@ -50,11 +50,21 @@ else
     echo -e "${RED}❌ Snap ikke installeret - springer over${NC}"
 fi
 
-echo -e "\n${YELLOW}[6/6] Rydder op i systemet, cache og gamle kernels...${NC}"
+echo -e "\n${YELLOW}[6/7] Rydder op i systemet, cache og gamle kernels...${NC}"
 sudo apt autoremove --purge -y
 sudo apt autoclean -y
 sudo apt clean -y
 sudo journalctl --vacuum-time=3d 2>/dev/null || true
+
+echo -e "\n${YELLOW}[7/7] Nulstiller Update Manager (mintupdate)...${NC}"
+if pgrep -x "mintupdate" > /dev/null; then
+    killall mintupdate 2>/dev/null || true
+    sleep 1
+    nohup mintupdate &> /dev/null &
+    echo -e "${GREEN}✅ Update Manager genstartet${NC}"
+else
+    echo -e "${GREEN}✅ Update Manager er ikke aktiv i baggrunden${NC}"
+fi
 
 echo -e "\n${PURPLE}========================================${NC}"
 echo -e "${GREEN}✅ UPRYD - Færdig!${NC}"
