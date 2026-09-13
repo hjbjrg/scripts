@@ -61,4 +61,22 @@ fi
 # ============================================
 sync_repo "$HOME/projects/birdbase" "Birdbase"
 
+# ============================================
+# 4. Opdater serveren
+# ============================================
+echo "🌐 Opdaterer serveren..."
+echo ""
+
+if [ -d "$HOME/projects/birdbase" ]; then
+    echo "--- Birdbase på server ---"
+    ssh hjbjrg.com@ssh.simply.com "cd /var/www/hjbjrg.com/public_html/birdbase && git pull origin main"
+    echo ""
+fi
+
+if [ -d "$HOME/projects/problembasen" ]; then
+    echo "--- Problembasen på server ---"
+    ssh hjbjrg.com@ssh.simply.com "cd /var/www/hjbjrg.com/public_html/problembase && git pull origin main"
+    echo ""
+fi
+
 echo "✅ Synkronisering færdig."
