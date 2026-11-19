@@ -1,8 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
+#
+# upryd - Linux Mint opdatering og oprydning
+# Kør som almindelig bruger (IKKE med sudo)
+#
 
-# ============================================
-# UPRYD - Komplet opdatering til Linux Mint
-# ============================================
+set -u  # Fejl ved brug af udefinerede variabler (fanger tastefejl)
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -11,65 +13,152 @@ BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
 NC='\033[0m'
 
-if [ "$EUID" -eq 0 ]; then 
+REPO_FILE="/etc/apt/sources.list.d/official-package-repositories.list"
+
+# --- Sikkerhedstjek: må ikke køres som root ---
+if [ "$EUID" -eq 0 ]; then
     echo -e "${RED}Advarsel: Kører som root - det anbefales ikke!${NC}"
     echo -e "${YELLOW}Brug i stedet: upryd (uden sudo)${NC}"
     exit 1
 fi
 
+# --- Hjælpefunktion: kør kommando og rapportér fejl, men stop ikke scriptet ---
+run_step() {
+    local beskrivelse="$1"
+    shift
+    if "$@"; then
+        return 0
+    else
+        echo -e "${RED}✖ Fejl under: ${beskrivelse}${NC}"
+        return 1
+    fi
+}
+
+# --- Find hurtigste spejle (valgfrit med -s/--spejle) ---
+find_hurtigste_spejle() {
+    echo -e "${YELLOW}🔍 Tester hastighed på nærliggende spejle...${NC}"
+
+    local MINT_MIRRORS=(
+        "https://mirrors.dotsrc.org/linuxmint-packages"
+        "https://ftp.acc.umu.se/mirror/linuxmint.com/packages"
+        "https://ftp.halifax.rwth-aachen.de/linuxmint"
+        "https://mirror.dk.leaseweb.net/linuxmint-packages"
+    )
+
+    local UBUNTU_MIRRORS=(
+        "https://mirrors.dotsrc.org/ubuntu"
+        "https://ftp.acc.umu.se/ubuntu"
+        "https://ftp.tu-ilmenau.de/mirror/ubuntu"
+        "https://dk.archive.ubuntu.com/ubuntu"
+    )
+
+    local best_mint="" best_mint_time="999"
+    for url in "${MINT_MIRRORS[@]}"; do
+        t=$(curl -o /dev/null -sL --max-time 4 -w "%{time_total}" "${url}/dists/zena/Release" 2>/dev/null || echo "999")
+        # Sikr at t er et tal, ellers spring over
+        [[ "$t" =~ ^[0-9]+(\.[0-9]+)?$ ]] || t="999"
+        if awk "BEGIN {exit !($t < $best_mint_time && $t > 0)}"; then
+            best_mint_time="$t"
+            best_mint="$url"
+        fi
+    done
+
+    local best_ubuntu="" best_ubuntu_time="999"
+    for url in "${UBUNTU_MIRRORS[@]}"; do
+        t=$(curl -o /dev/null -sL --max-time 4 -w "%{time_total}" "${url}/dists/noble/Release" 2>/dev/null || echo "999")
+        [[ "$t" =~ ^[0-9]+(\.[0-9]+)?$ ]] || t="999"
+        if awk "BEGIN {exit !($t < $best_ubuntu_time && $t > 0)}"; then
+            best_ubuntu_time="$t"
+            best_ubuntu="$url"
+        fi
+    done
+
+    if [[ -n "$best_mint" && -n "$best_ubuntu" ]]; then
+        echo -e "${GREEN}✔ Hurtigste Mint-spejl:   ${best_mint} (${best_mint_time}s)${NC}"
+        echo -e "${GREEN}✔ Hurtigste Ubuntu-spejl: ${best_ubuntu} (${best_ubuntu_time}s)${NC}"
+
+        # Brug fuld sti til cp og tee, så NOPASSWD-reglerne matcher
+        /usr/bin/sudo /usr/bin/cp "$REPO_FILE" "${REPO_FILE}.bak"
+
+        /usr/bin/sudo /usr/bin/tee "$REPO_FILE" > /dev/null <<INNER
+deb ${best_mint} zena main upstream import backport
+
+deb ${best_ubuntu} noble main restricted universe multiverse
+deb ${best_ubuntu} noble-updates main restricted universe multiverse
+deb ${best_ubuntu} noble-backports main restricted universe multiverse
+
+deb http://security.ubuntu.com/ubuntu/ noble-security main restricted universe multiverse
+INNER
+        echo -e "${BLUE}➜ Spejle opdateret (backup gemt som ${REPO_FILE}.bak)${NC}\n"
+    else
+        echo -e "${RED}✖ Kunne ikke måle spejle (tjek internetforbindelse). Beholder nuværende.${NC}\n"
+    fi
+}
+
+# --- Header ---
 clear
 echo -e "${PURPLE}========================================${NC}"
-echo -e "${PURPLE}      🍃 UPRYD - Linux Mint${NC}"
+echo -e "${PURPLE}      🍃 UPRYD - Linux Mint 22.3${NC}"
 echo -e "${PURPLE}========================================${NC}"
-echo -e "${BLUE}Start: $(date)${NC}\n"
+echo -e "${BLUE}Start: $(date '+%d-%m-%Y %H:%M:%S')${NC}\n"
 
-echo -e "${YELLOW}[1/7] Opdaterer pakkelister...${NC}"
-sudo apt update -qq
+# --- Valgfri spejloptimering ---
+if [[ "${1:-}" == "-s" || "${1:-}" == "--spejle" ]]; then
+    find_hurtigste_spejle
+fi
 
-echo -e "\n${YELLOW}[2/7] Opgraderer pakker...${NC}"
-sudo apt upgrade -y
+# --- [1/5] apt update ---
+echo -e "${YELLOW}[1/5] Opdaterer pakkelister...${NC}"
+if ! run_step "apt update" /usr/bin/sudo /usr/bin/apt update -qq; then
+    echo -e "${RED}✖ Kan ikke fortsætte uden opdaterede pakkelister. Tjek netværket.${NC}"
+    exit 1
+fi
 
-echo -e "\n${YELLOW}[3/7] Opgraderer distribution...${NC}"
-sudo apt dist-upgrade -y
+# --- [2/5] full-upgrade ---
+echo -e "\n${YELLOW}[2/5] Opgraderer system og pakker...${NC}"
+run_step "apt full-upgrade" /usr/bin/sudo /usr/bin/apt full-upgrade -y
 
-echo -e "\n${YELLOW}[4/7] Opdaterer Flatpak-pakker...${NC}"
+# --- [3/5] Flatpak ---
+echo -e "\n${YELLOW}[3/5] Opdaterer Flatpak...${NC}"
 if command -v flatpak &> /dev/null; then
-    echo -e "${GREEN}✅ Flatpak fundet - opdaterer...${NC}"
-    flatpak update -y
-    echo -e "\n${GREEN}Fjerner ubrugte Flatpak-pakker...${NC}"
-    flatpak uninstall --unused -y
+    # --noninteractive undgår eventuelle spørgsmål; system-opdateringer går via polkit
+    run_step "flatpak update" flatpak update -y --noninteractive
+    run_step "flatpak uninstall --unused" flatpak uninstall --unused -y --noninteractive
 else
-    echo -e "${RED}❌ Flatpak ikke installeret - springer over${NC}"
+    echo -e "${BLUE}➜ Flatpak er ikke installeret - springer over${NC}"
 fi
 
-echo -e "\n${YELLOW}[5/7] Tjekker Snap...${NC}"
-if command -v snap &> /dev/null; then
-    echo -e "${GREEN}✅ Snap fundet - opdaterer...${NC}"
-    sudo snap refresh
-else
-    echo -e "${RED}❌ Snap ikke installeret - springer over${NC}"
-fi
+# --- [4/5] Oprydning ---
+echo -e "\n${YELLOW}[4/5] Rydder op i gamle pakker, kernels og logs...${NC}"
+run_step "apt autoremove --purge" /usr/bin/sudo /usr/bin/apt autoremove --purge -y
+run_step "apt clean" /usr/bin/sudo /usr/bin/apt clean
+# journalctl vacuum: kører via sudo; hvis ikke tilladt, ignoreres fejlen pænt
+/usr/bin/sudo /usr/bin/journalctl --vacuum-time=3d 2>/dev/null || \
+    echo -e "${BLUE}➜ journalctl-oprydning ikke tilladt uden password - springer over${NC}"
 
-echo -e "\n${YELLOW}[6/7] Rydder op i systemet, cache og gamle kernels...${NC}"
-sudo apt autoremove --purge -y
-sudo apt autoclean -y
-sudo apt clean -y
-sudo journalctl --vacuum-time=3d 2>/dev/null || true
-
-echo -e "\n${YELLOW}[7/7] Nulstiller Update Manager (mintupdate)...${NC}"
+# --- [5/5] Update Manager ikon ---
+echo -e "\n${YELLOW}[5/5] Opdaterer Update Manager-ikonet...${NC}"
 if pgrep -x "mintupdate" > /dev/null; then
     killall mintupdate 2>/dev/null || true
     sleep 1
-    nohup mintupdate &> /dev/null &
-    echo -e "${GREEN}✅ Update Manager genstartet${NC}"
+    nohup mintupdate-launcher &> /dev/null &
+    echo -e "${GREEN}✔ Update Manager nulstillet i systembakken${NC}"
 else
-    echo -e "${GREEN}✅ Update Manager er ikke aktiv i baggrunden${NC}"
+    echo -e "${GREEN}✔ Update Manager er ikke aktiv i baggrunden${NC}"
 fi
 
+# --- Reboot-check ---
+REBOOT_MSG=""
+if [ -f /var/run/reboot-required ]; then
+    REBOOT_MSG="\n${RED}⚠️  BEMÆRK: Systemet kræver en genstart for at aktivere opdateringer (f.eks. ny kerne).${NC}"
+fi
+
+# --- Afslutning ---
 echo -e "\n${PURPLE}========================================${NC}"
 echo -e "${GREEN}✅ UPRYD - Færdig!${NC}"
 echo -e "${PURPLE}========================================${NC}"
-echo -e "${BLUE}Slut: $(date)${NC}\n"
+echo -e "${BLUE}Slut: $(date '+%d-%m-%Y %H:%M:%S')${NC}"
+echo -e "${REBOOT_MSG}\n"
 
 echo -e "${YELLOW}📊 Systemstatus:${NC}"
 echo -e "${BLUE}➜ OS:${NC} $(lsb_release -ds 2>/dev/null || echo "Linux Mint")"
@@ -78,5 +167,8 @@ echo -e "${BLUE}➜ Uptime:${NC} $(uptime -p | sed 's/up //')"
 echo -e "${BLUE}➜ Diskplads:${NC}"
 df -h / | awk 'NR==2 {print "  Brugt: " $3 " / " $2 " (" $5 ")"}'
 
-echo -e "\n${GREEN}Tryk Enter for at afslutte...${NC}"
-read
+# Kun pause hvis scriptet køres interaktivt (ikke via cron/systemd)
+if [ -t 0 ]; then
+    echo -e "\n${GREEN}Tryk Enter for at afslutte...${NC}"
+    read -r
+fi
